@@ -22,7 +22,7 @@ from telegram.ext import (
 )
 
 # ---------- Config ----------
-TG_TOKEN = os.environ.get("TG_TOKEN") or "PUT_YOUR_TOKEN_HERE"
+TG_TOKEN = os.environ.get("TG_TOKEN") or "8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
 DATA_DIR = Path("bot_data")
 TARGET_WA_FILE = DATA_DIR / "target_wa.txt"
 HASIL_FILE = DATA_DIR / "hasil_ip.txt"
