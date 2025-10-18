@@ -77,7 +77,7 @@ def format_ip_message(d: dict) -> str:
     )
 
 START_TEXT = (
-    "✨ *IP TRACK – ANGKASA EDITION*\n"
+    "✨ *IP TRACK – NezaFx*\n"
     "• Kirim/paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
     "• Bot menampilkan: Country, Region, City, ISP, ASN, Reverse DNS, Timezone, Coords.\n"
     "• Password kuat dikirim terpisah + tombol *Copy* (1-tap)."
@@ -109,7 +109,7 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = f"{WEBAPP_URL}?t={urllib.parse.quote_plus(b64)}"
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔁 Copy to Clipboard", web_app=WebAppInfo(url=url))]])
         # pesan password tetap dikirim polos untuk fallback
-        await update.message.reply_text(f"🔐 Password (copy 1x):\n{pwd}", reply_markup=kb)
+        await update.message.reply_text(f"🔐 Password :\n{pwd}", reply_markup=kb)
 
 # ---------- Main ----------
 def main():
