@@ -127,8 +127,6 @@ Kirim: <code>97.229.26.68</code>  atau log yang berisi IP.
 
 <small>Tip: Anda bisa kirim banyak IP sekaligus (mis. potongan log) — bot akan memproses satu per satu.</small>
 """
-)
-
 # ---------- Handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(tg_escape(START_TEXT), parse_mode="MarkdownV2")
