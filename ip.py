@@ -119,7 +119,7 @@ START_TEXT = (
     "<b>Quick actions</b>:\n"
     "• 🗺️ Maps  •  🔎 RDNS  •  📖 WHOIS  •  ⚠️ Scamalytics\n\n"
     "<b>Contoh</b>:\n"
-    "Kirim: <code>97.229.26.68</code> atau log yang berisi IP.\n\n"
+    "Kirim: <code>123.xx.xxx.xx</code> atau log yang berisi IP.\n\n"
     "<i>Tip: Bisa kirim banyak IP sekaligus (mis. potongan log) — bot memproses satu per satu.</i>"
 )
 
