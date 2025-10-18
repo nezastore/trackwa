@@ -81,7 +81,7 @@ def query_ip_api(ip: str):
 # ---------- Text ----------
 HELP_TEXT = (
     "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
-    "  🚀 IP TRACK – ANGKASA EDITION\n"
+    "  🚀 IP TRACK – NezaFx EDITION\n"
     "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
     "✨ *Cara Pakai:*\n"
     "• Paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
