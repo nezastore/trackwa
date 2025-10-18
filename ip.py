@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-IP Track Bot (Pro UI • Clean Card • Copy-friendly Password)
+IP Track Bot — Modern & Clean UI
 Dependencies:
   pip install python-telegram-bot==20.4 requests
 Run:
@@ -12,22 +12,23 @@ from requests.utils import requote_uri
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-# ---------- CONFIG ----------
+# ========== CONFIG ==========
 TG_TOKEN = "8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
 IP_API_URL = (
     "http://ip-api.com/json/{}"
     "?fields=status,message,query,country,regionName,city,isp,as,lat,lon,reverse,timezone"
 )
 DEFAULT_PASSLEN = 24
-CARD_WIDTH = 52  # lebar kartu monospace
-# ----------------------------
+# ============================
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger("iptrack")
 
-# ---------- UTIL ----------
-MDV2 = r'([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])'
-def tg_escape(text: str) -> str: return re.sub(MDV2, r'\\\1', text)
+# ---------- Utils ----------
+MDV2_SPECIALS = r'([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])'
+def tg_escape(text: str) -> str:
+    """Escape karakter spesial MarkdownV2 (pakai untuk NILAI/teks dinamis)."""
+    return re.sub(MDV2_SPECIALS, r'\\\1', text)
 
 def generate_password_strict(length=DEFAULT_PASSLEN) -> str:
     uppers, lowers, digits = string.ascii_uppercase, string.ascii_lowercase, string.digits
@@ -40,7 +41,7 @@ def generate_password_strict(length=DEFAULT_PASSLEN) -> str:
     pool = uppers + lowers + digits + symbols
     for _ in range(length - len(base)):
         c = secrets.choice(pool)
-        base.append(c if c != base[-1] else secrets.choice(pool.replace(c, "")))
+        base.append(c if not base or c != base[-1] else secrets.choice(pool.replace(c, "")))
     secrets.SystemRandom().shuffle(base)
     out = [base[0]]
     for ch in base[1:]:
@@ -51,78 +52,74 @@ def extract_ips_from_text(text: str):
     found = set()
     for token in text.replace(",", " ").replace(";", " ").replace("|", " ").split():
         t = token.strip("[]()").rstrip(".,:;")
-        if "%" in t: t = t.split("%", 1)[0]
+        if "%" in t: t = t.split("%", 1)[0]  # buang zone id IPv6
         try:
             found.add(str(ipaddress.ip_address(t)))
         except Exception:
             pass
     return sorted(found)
 
-# --- data fetch & render ---
-def fetch_ip_data(ip: str):
-    """Return dict with IP data or str error."""
+def fetch_ip(ip: str):
     try:
-        js = requests.get(requote_uri(IP_API_URL.format(ip)), timeout=8).json()
+        r = requests.get(requote_uri(IP_API_URL.format(ip)), timeout=8).json()
     except Exception as e:
         logger.error("API error: %s", e)
-        return f"Error: gagal koneksi API untuk {ip}"
-    if js.get("status") != "success":
-        return f"Error: {ip} → {js.get('message','unknown')}"
+        return {"error": f"Gagal koneksi API untuk {ip}"}
+    if r.get("status") != "success":
+        return {"error": f"{ip} → {r.get('message','unknown')}"}
     return {
-        "ip": js.get("query"),
-        "version": "IPv6" if ":" in js.get("query","") else "IPv4",
-        "country": js.get("country"),
-        "region": js.get("regionName","-"),
-        "city": js.get("city","-"),
-        "isp": js.get("isp","-"),
-        "asn": js.get("as","-"),
-        "reverse": js.get("reverse","-"),
-        "tz": js.get("timezone","-"),
-        "lat": js.get("lat"),
-        "lon": js.get("lon"),
+        "ip": r.get("query"),
+        "version": "IPv6" if ":" in (r.get("query") or "") else "IPv4",
+        "country": r.get("country") or "-",
+        "region": r.get("regionName") or "-",
+        "city": r.get("city") or "-",
+        "isp": r.get("isp") or "-",
+        "asn": r.get("as") or "-",
+        "reverse": r.get("reverse") or "-",
+        "tz": r.get("timezone") or "-",
+        "coords": f"{r.get('lat')}, {r.get('lon')}",
     }
 
-def _pad_line(label: str, value: str, width: int):
-    line = f" {label:<11}: {value}"
-    return line[:width-1] if len(line) >= width-1 else line + " "*(width-1-len(line))
+def format_ip_message(data: dict) -> str:
+    """
+    Format modern & clean dengan MarkdownV2.
+    Hanya nilai yang di-escape agar aman; label dibiarkan untuk styling.
+    """
+    ip = tg_escape(data["ip"])
+    country = tg_escape(data["country"])
+    region = tg_escape(data["region"])
+    city = tg_escape(data["city"])
+    isp = tg_escape(data["isp"])
+    asn = tg_escape(data["asn"])
+    reverse = tg_escape(data["reverse"])
+    tz = tg_escape(data["tz"])
+    coords = tg_escape(data["coords"])
+    version = tg_escape(data["version"])
 
-def render_card(data: dict) -> str:
-    """Return a neat monospace card inside MarkdownV2 code block."""
-    w = CARD_WIDTH
-    top    = "┌" + "─"*(w-2) + "┐"
-    bottom = "└" + "─"*(w-2) + "┘"
-    header = f" IP Insight  •  {data['version']}"
-    header_line = "│" + header.center(w-2) + "│"
-    lines = [
-        _pad_line("IP",        data["ip"], w),
-        _pad_line("Country",   data["country"], w),
-        _pad_line("Region",    data["region"], w),
-        _pad_line("City",      data["city"], w),
-        _pad_line("ISP",       data["isp"], w),
-        _pad_line("ASN",       data["asn"], w),
-        _pad_line("ReverseDNS",data["reverse"], w),
-        _pad_line("Timezone",  data["tz"], w),
-        _pad_line("Coords",    f"{data['lat']}, {data['lon']}", w),
-    ]
-    body = "\n".join("│" + ln + "│" for ln in lines)
-    card = f"{top}\n{header_line}\n{body}\n{bottom}"
-    # wrap as code block (content inside tidak perlu di-escape)
-    return f"```\n{card}\n```"
+    return (
+        f"🧭 *IP:* `{data['ip']}`  •  *{version}*\n"
+        f"🏳️ *Country:* {country}\n"
+        f"🗺️ *Region:* {region}\n"
+        f"🏙️ *City:* {city}\n"
+        f"🏢 *ISP:* {isp}\n"
+        f"📡 *ASN:* {asn}\n"
+        f"🖥️ *Reverse DNS:* {reverse}\n"
+        f"⏱️ *Timezone:* {tz}\n"
+        f"📍 *Coords:* {coords}"
+    )
 
-# ---------- TEXT ----------
-HELP_TEXT = (
-    "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
-    "  🚀 IP TRACK – ANGKASA EDITION\n"
-    "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-    "• Paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
-    "• Bot menampilkan kartu ringkas: Negara, Kota, ISP, ASN,\n"
-    "  Reverse DNS, Timezone, Koordinat.\n"
-    "• Setiap IP → password acak & kuat (pesan terpisah untuk mudah copy)."
+# ---------- Text ----------
+START_TEXT = (
+    "✨ *IP TRACK – ANGKASA EDITION*\n"
+    "—\n"
+    "• Kirim/paste IP (IPv4/IPv6) atau baris log yang berisi IP.\n"
+    "• Bot menampilkan: Country, Region, City, ISP, ASN, Reverse DNS, Timezone, dan Coords.\n"
+    "• Setiap IP akan dibuatkan *password kuat* di pesan terpisah agar mudah di-copy."
 )
 
-# ---------- HANDLERS ----------
+# ---------- Handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(tg_escape(HELP_TEXT), parse_mode="MarkdownV2")
+    await update.message.reply_text(tg_escape(START_TEXT), parse_mode="MarkdownV2")
 
 async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
@@ -132,21 +129,20 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for ip in ips:
-        data = fetch_ip_data(ip)
-        if isinstance(data, str):
-            # error text
-            await update.message.reply_text(tg_escape(f"❌ {data}"), parse_mode="MarkdownV2")
+        data = fetch_ip(ip)
+        if "error" in data:
+            await update.message.reply_text(tg_escape("❌ " + data["error"]), parse_mode="MarkdownV2")
             continue
 
-        # 1) KARTU INFO (code block monospace — rapi & profesional)
-        card = render_card(data)
-        await update.message.reply_text(card, parse_mode="MarkdownV2")
+        # 1) INFO — modern & clean (MarkdownV2)
+        msg = format_ip_message(data)
+        await update.message.reply_text(msg, parse_mode="MarkdownV2")
 
-        # 2) PASSWORD (pesan terpisah TANPA parse_mode → copy lebih mulus & bebas karakter spesial)
+        # 2) PASSWORD — pesan terpisah TANPA parse_mode agar bisa dicopy persis
         pwd = generate_password_strict()
         await update.message.reply_text(f"🔐 Password (copy 1x):\n{pwd}")
 
-# ---------- MAIN ----------
+# ---------- Main ----------
 def main():
     app = ApplicationBuilder().token(TG_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
