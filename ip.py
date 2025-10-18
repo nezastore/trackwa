@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# IP Track Bot — Modern UI + One-tap Copy (WebApp)
+# IP Track Bot — Modern UI + One-tap Copy via code block (tanpa HTML)
 # pip install python-telegram-bot==20.4 requests
 
-import logging, re, requests, ipaddress, secrets, string, base64, urllib.parse
+import logging, re, requests, ipaddress, secrets, string
 from requests.utils import requote_uri
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 # ========== CONFIG ==========
@@ -12,7 +12,6 @@ TG_TOKEN = "8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
 IP_API_URL = ("http://ip-api.com/json/{}"
               "?fields=status,message,query,country,regionName,city,isp,as,lat,lon,reverse,timezone")
 DEFAULT_PASSLEN = 24
-WEBAPP_URL = "https://ajurr.net/infoip/"   # ← URL WebApp kamu (HTTPS)
 # ============================
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -20,7 +19,9 @@ logger = logging.getLogger("iptrack")
 
 # ---------- Utils ----------
 MDV2_SPECIALS = r'([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])'
-def tg_escape(s: str) -> str: return re.sub(MDV2_SPECIALS, r'\\\1', s)
+def tg_escape(s: str) -> str:
+    """Escape karakter spesial MarkdownV2 (gunakan untuk NILAI dinamis)."""
+    return re.sub(MDV2_SPECIALS, r'\\\1', s)
 
 def generate_password_strict(n=DEFAULT_PASSLEN) -> str:
     U, L, D, S = string.ascii_uppercase, string.ascii_lowercase, string.digits, "!@#$%^&*()-_=+[]{}:;,.?/<>"
@@ -31,7 +32,6 @@ def generate_password_strict(n=DEFAULT_PASSLEN) -> str:
         c = secrets.choice(pool)
         out.append(c if c != out[-1] else secrets.choice(pool.replace(c, "")))
     secrets.SystemRandom().shuffle(out)
-    # hindari duplikat berdempetan
     fixed = [out[0]]
     for ch in out[1:]:
         fixed.append(secrets.choice(pool.replace(fixed[-1], "")) if ch == fixed[-1] else ch)
@@ -69,30 +69,29 @@ def fetch_ip(ip: str):
     }
 
 def format_ip_message(d: dict) -> str:
-    # Semua nilai di-escape agar aman untuk MarkdownV2
+    # Label pakai styling, nilai di-escape biar aman MarkdownV2
     ip = tg_escape(d["ip"]); ver = tg_escape(d["version"])
     country = tg_escape(d["country"]); region = tg_escape(d["region"]); city = tg_escape(d["city"])
     isp = tg_escape(d["isp"]); asn = tg_escape(d["asn"]); rev = tg_escape(d["reverse"])
     tz = tg_escape(d["tz"]); coords = tg_escape(d["coords"])
-    # Tampilan modern: judul tebal + bullet icons, tanpa backtick yg mengganggu
     return (
-        f"**IP Report** · *{ver}*\n"
-        f"🧭 **IP**: {ip}\n"
-        f"🏳️ **Country**: {country}\n"
-        f"🗺️ **Region**: {region}\n"
-        f"🏙️ **City**: {city}\n"
-        f"🏢 **ISP**: {isp}\n"
-        f"📡 **ASN**: {asn}\n"
-        f"🖥️ **Reverse DNS**: {rev}\n"
-        f"⏱️ **Timezone**: {tz}\n"
-        f"📍 **Coords**: {coords}"
+        f"*IP Report* · _{ver}_\n"
+        f"🧭 *IP*: `{d['ip']}`\n"
+        f"🏳️ *Country*: {country}\n"
+        f"🗺️ *Region*: {region}\n"
+        f"🏙️ *City*: {city}\n"
+        f"🏢 *ISP*: {isp}\n"
+        f"📡 *ASN*: {asn}\n"
+        f"🖥️ *Reverse DNS*: {rev}\n"
+        f"⏱️ *Timezone*: {tz}\n"
+        f"📍 *Coords*: {coords}"
     )
 
 START_TEXT = (
-    "**IP TRACK – NezaFx**\n"
+    "*IP TRACK – NezaFx*\n"
     "• Kirim/paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
     "• Bot menampilkan: Country, Region, City, ISP, ASN, Reverse DNS, Timezone, Coords.\n"
-    "• Password kuat dikirim terpisah + tombol *Copy* (1-tap)."
+    "• Password kuat dikirim di pesan yang sama dalam *code block* (ada tombol Copy)."
 )
 
 # ---------- Handlers ----------
@@ -112,22 +111,20 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tg_escape("❌ " + data["error"]), parse_mode="MarkdownV2")
             continue
 
-        # 1) Info modern & rapi (MarkdownV2)
-        await update.message.reply_text(format_ip_message(data), parse_mode="MarkdownV2")
-
-        # 2) Password plain + tombol WebApp (1-tap copy)
+        # Info rapi + password dalam code block di pesan yang sama (1-tap copy)
         pwd = generate_password_strict()
-        b64 = base64.urlsafe_b64encode(pwd.encode()).decode()
-        url = f"{WEBAPP_URL}?t={urllib.parse.quote_plus(b64)}"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔁 Copy to Clipboard", web_app=WebAppInfo(url=url))]])
-        await update.message.reply_text(f"🔐 Password:\n{pwd}", reply_markup=kb)  # tanpa parse_mode → aman
+        info_part = format_ip_message(data)                 # sudah aman (nilai di-escape)
+        title = tg_escape("🔐 Password:")                   # judul perlu di-escape
+        # gabungkan — JANGAN escape isi code block
+        full = f"{info_part}\n\n{title}\n```\n{pwd}\n```"
+        await update.message.reply_text(full, parse_mode="MarkdownV2")
 
 # ---------- Main ----------
 def main():
     app = ApplicationBuilder().token(TG_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_process))
-    print("✅ Bot berjalan (auto on paste, 1-tap copy via WebApp).")
+    print("✅ Bot berjalan (auto on paste, one-tap copy via code block).")
     app.run_polling()
 
 if __name__ == "__main__":
