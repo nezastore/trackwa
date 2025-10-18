@@ -125,7 +125,8 @@ START_TEXT = (
 
 # ---------- Handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(tg_escape(START_TEXT), parse_mode="MarkdownV2")
+    # Pakai HTML agar tag <b>/<i>/<code> dirender rapi (jangan tg_escape)
+    await update.message.reply_text(START_TEXT, parse_mode="HTML", disable_web_page_preview=True)
 
 async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
