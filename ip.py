@@ -109,11 +109,24 @@ def action_keyboard(ip: str, lat, lon):
     ])
 
 # ---------- Text ----------
-START_TEXT = (
-    "*IP TRACK – NezaFx*\n"
-    "• Paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
-    "• Bot menampilkan Country, Region, City, ISP, ASN, Reverse DNS, Timezone, Coords.\n"
-    "• Password dikirim terpisah sebagai *code block* — tombol **Copy** muncul otomatis."
+START_TEXT = """\
+✨ <b>IP TRACK – NezaFx</b>
+<small>Fast IP intel · clean UI</small>
+<hr/>
+
+<b>Cara pakai</b>:
+• Paste IP <i>(IPv4 / IPv6)</i> atau baris log berisi IP.  
+• Bot menampilkan: <b>Country</b>, <b>Region</b>, <b>City</b>, <b>ISP</b>, <b>ASN</b>, <b>Reverse DNS</b>, <b>Timezone</b>, <b>Coords</b>.  
+• Password dikirim terpisah sebagai <code>code block</code> — tombol <b>Copy</b> muncul otomatis.
+
+<b>Quick actions</b>:
+• 🗺️ Maps • 🔎 RDNS • 📖 WHOIS • ⚠️ Scamalytics
+
+<b>Contoh</b>:
+Kirim: <code>97.229.26.68</code>  atau log yang berisi IP.
+
+<small>Tip: Anda bisa kirim banyak IP sekaligus (mis. potongan log) — bot akan memproses satu per satu.</small>
+"""
 )
 
 # ---------- Handlers ----------
