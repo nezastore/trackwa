@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-IP Track Bot (Clean UI, Reverse DNS & Timezone)
+IP Track Bot (Stable & Clean Version)
+Features:
+• Auto IPv4/IPv6 detect
+• Reverse DNS & Timezone
+• Password generator auto setiap IP
+• Tampilan rapi (MarkdownV2 aman)
 Dependencies:
   pip install python-telegram-bot==20.4 requests
-Run:
-  python3 iptrack_bot.py
 """
 
 import logging, re, requests, ipaddress, secrets, string
@@ -12,7 +15,7 @@ from requests.utils import requote_uri
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-# ---------- Config ----------
+# ---------- CONFIG ----------
 TG_TOKEN = "8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
 IP_API_URL = (
     "http://ip-api.com/json/{}"
@@ -24,9 +27,9 @@ DEFAULT_PASSLEN = 24
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger("iptrack")
 
-# ---------- Utility ----------
+# ---------- UTIL ----------
 def tg_escape(text: str) -> str:
-    """Escape karakter MarkdownV2 agar aman dikirim ke Telegram."""
+    """Escape karakter spesial MarkdownV2."""
     return re.sub(r'([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])', r'\\\1', text)
 
 def generate_password_strict(length=DEFAULT_PASSLEN) -> str:
@@ -54,7 +57,8 @@ def extract_ips_from_text(text: str):
     found = set()
     for token in text.replace(",", " ").replace(";", " ").replace("|", " ").split():
         t = token.strip("[]()").rstrip(".,:;")
-        if "%" in t: t = t.split("%", 1)[0]
+        if "%" in t:  # hapus zone id IPv6
+            t = t.split("%", 1)[0]
         try:
             found.add(str(ipaddress.ip_address(t)))
         except Exception:
@@ -80,20 +84,20 @@ def query_ip_api(ip: str) -> str:
         f"🧭 *Koordinat:* {r.get('lat')}, {r.get('lon')}"
     )
 
-# ---------- Text ----------
+# ---------- UI TEXT ----------
 HELP_TEXT = (
     "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
     "  🚀 *IP TRACK – ANGKASA EDITION*\n"
     "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
     "✨ *Cara Pakai:*\n"
     "• Paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
-    "• Bot akan otomatis menampilkan detail lengkap:\n"
-    "  Negara, Kota, ISP, ASN, Reverse DNS, Timezone, dan Koordinat.\n"
-    "• Setiap kali Anda paste IP, bot juga membuat *Password acak & kuat*.\n\n"
+    "• Bot menampilkan detail lengkap: Negara, Kota, ISP, ASN,\n"
+    "  Reverse DNS, Timezone, dan Koordinat.\n"
+    "• Setiap kali paste IP, bot juga membuat *Password acak & kuat*.\n\n"
     "💡 *Tips:* Bisa kirim beberapa IP sekaligus (mis. potongan log)."
 )
 
-# ---------- Handlers ----------
+# ---------- HANDLERS ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(tg_escape(HELP_TEXT), parse_mode="MarkdownV2")
 
@@ -108,20 +112,20 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for ip in ips:
         info = query_ip_api(ip)
         passwd = generate_password_strict()
-        # tampil elegan seperti kartu
+        # escape info dan judul saja
         block = (
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{tg_escape(info)}\n\n"
-            "🔐 *Password (copy 1x)*:\n"
-            f"╔══════════════════════╗\n"
-            f"║ `{passwd}` ║\n"
-            f"╚══════════════════════╝"
+            f"{tg_escape('🔐 Password (copy 1x):')}\n"
+            "```\n"           # code block aman untuk karakter simbol
+            f"{passwd}\n"
+            "```"
         )
         results.append(block)
 
     await update.message.reply_text("\n\n".join(results), parse_mode="MarkdownV2")
 
-# ---------- Main ----------
+# ---------- MAIN ----------
 def main():
     app = ApplicationBuilder().token(TG_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
