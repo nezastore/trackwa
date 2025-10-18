@@ -15,7 +15,7 @@ from telegram import Update, InputFile
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 # ====== Config ======
-TG_TOKEN = os.environ.get("TG_TOKEN") or ""
+TG_TOKEN = os.environ.get("8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A") or ""
 DATA_DIR = Path("bot_data")
 HASIL_FILE = DATA_DIR / "hasil_ip.txt"
 # minta reverse DNS & timezone juga (gratis di ip-api.com)
