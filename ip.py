@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-IP Track Bot (Stable Copy-Friendly Version)
+IP Track Bot (Stable Copy-Friendly, No-Error)
+Features:
+• Auto IPv4/IPv6 detect
+• Reverse DNS & Timezone
+• Password kuat per IP
+• Info pakai MarkdownV2, password dikirim sebagai teks polos (tanpa parse mode)
 Dependencies:
   pip install python-telegram-bot==20.4 requests
 """
@@ -24,7 +29,7 @@ logger = logging.getLogger("iptrack")
 
 # ---------- UTIL ----------
 def tg_escape(text: str) -> str:
-    """Escape karakter spesial MarkdownV2 supaya aman dikirim ke Telegram."""
+    """Escape karakter spesial MarkdownV2."""
     return re.sub(r'([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])', r'\\\1', text)
 
 def generate_password_strict(length=DEFAULT_PASSLEN) -> str:
@@ -67,6 +72,7 @@ def query_ip_api(ip: str) -> str:
         return f"❌ Error koneksi API untuk {ip}"
     if r.get("status") != "success":
         return f"❌ Gagal cek IP {ip}: {r.get('message','unknown')}"
+    # pakai markdown di teks info (nanti di-escape lagi untuk aman)
     return (
         f"📍 *Hasil untuk IP:* `{r.get('query')}`\n\n"
         f"🏳️ *Negara:* {r.get('country')}\n"
@@ -102,20 +108,14 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(tg_escape("⚠️ Tidak ada IP valid ditemukan."), parse_mode="MarkdownV2")
         return
 
-    results = []
     for ip in ips:
+        # 1) kirim INFO (MarkdownV2 aman)
         info = query_ip_api(ip)
-        passwd = generate_password_strict()
-        # Escape info & judul, tapi password dikirim tanpa escape (agar mudah copy)
-        block = (
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{tg_escape(info)}\n\n"
-            f"{tg_escape('🔐 Password Random:')}\n"
-            f"{passwd}"  # plain text, bukan code block
-        )
-        results.append(block)
+        await update.message.reply_text(tg_escape(info), parse_mode="MarkdownV2")
 
-    await update.message.reply_text("\n\n".join(results), parse_mode="MarkdownV2")
+        # 2) kirim PASSWORD sebagai TEKS POLOS (tanpa parse_mode) → bebas karakter {},[] dst.
+        passwd = generate_password_strict()
+        await update.message.reply_text(f"🔐 Password (copy 1x):\n{passwd}")
 
 # ---------- MAIN ----------
 def main():
