@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-IP Track Bot (Stable & Clean Version)
-Features:
-• Auto IPv4/IPv6 detect
-• Reverse DNS & Timezone
-• Password generator auto setiap IP
-• Tampilan rapi (MarkdownV2 aman)
+IP Track Bot (Stable Copy-Friendly Version)
 Dependencies:
   pip install python-telegram-bot==20.4 requests
 """
@@ -29,7 +24,7 @@ logger = logging.getLogger("iptrack")
 
 # ---------- UTIL ----------
 def tg_escape(text: str) -> str:
-    """Escape karakter spesial MarkdownV2."""
+    """Escape karakter spesial MarkdownV2 supaya aman dikirim ke Telegram."""
     return re.sub(r'([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])', r'\\\1', text)
 
 def generate_password_strict(length=DEFAULT_PASSLEN) -> str:
@@ -57,8 +52,7 @@ def extract_ips_from_text(text: str):
     found = set()
     for token in text.replace(",", " ").replace(";", " ").replace("|", " ").split():
         t = token.strip("[]()").rstrip(".,:;")
-        if "%" in t:  # hapus zone id IPv6
-            t = t.split("%", 1)[0]
+        if "%" in t: t = t.split("%", 1)[0]
         try:
             found.add(str(ipaddress.ip_address(t)))
         except Exception:
@@ -84,7 +78,7 @@ def query_ip_api(ip: str) -> str:
         f"🧭 *Koordinat:* {r.get('lat')}, {r.get('lon')}"
     )
 
-# ---------- UI TEXT ----------
+# ---------- TEXT ----------
 HELP_TEXT = (
     "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
     "  🚀 *IP TRACK – ANGKASA EDITION*\n"
@@ -112,14 +106,12 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for ip in ips:
         info = query_ip_api(ip)
         passwd = generate_password_strict()
-        # escape info dan judul saja
+        # Escape info & judul, tapi password dikirim tanpa escape (agar mudah copy)
         block = (
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{tg_escape(info)}\n\n"
-            f"{tg_escape('🔐 Password (copy 1x):')}\n"
-            "```\n"           # code block aman untuk karakter simbol
-            f"{passwd}\n"
-            "```"
+            f"{tg_escape('🔐 Password Random:')}\n"
+            f"{passwd}"  # plain text, bukan code block
         )
         results.append(block)
 
