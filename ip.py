@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-# IP Track Bot — Modern UI + 1-tap Copy + Scamalytics link (Regenerate removed)
+# IP Track Bot — Modern UI + One-tap Copy via code block (no HTML)
 # pip install python-telegram-bot==20.4 requests
 
-import logging, re, requests, ipaddress, secrets, string, base64, urllib.parse
+import logging, re, requests, ipaddress, secrets, string, urllib.parse
 from requests.utils import requote_uri
-from telegram import (
-    Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-)
-from telegram.ext import (
-    ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-)
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 # ========== CONFIG ==========
 TG_TOKEN = "8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
@@ -18,7 +14,6 @@ IP_API_URL = (
     "?fields=status,message,query,country,countryCode,regionName,city,isp,as,lat,lon,reverse,timezone"
 )
 DEFAULT_PASSLEN = 24
-WEBAPP_URL = "https://ajurr.net/infoip/"   # WebApp penyalin (HTTPS) — tetap dipakai untuk 1-tap copy
 # ============================
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -35,7 +30,8 @@ def flag_emoji(cc: str) -> str:
 
 def generate_password_strict(n=DEFAULT_PASSLEN) -> str:
     U, L, D, S = string.ascii_uppercase, string.ascii_lowercase, string.digits, "!@#$%^&*()-_=+[]{}:;,.?/<>"
-    if n < 8: n = 8
+    # NOTE: tidak memasukkan backtick (`) agar aman di code block
+    if n < 12: n = 12
     out = [secrets.choice(U), secrets.choice(L), secrets.choice(D), secrets.choice(S), secrets.choice(S)]
     pool = U + L + D + S
     for _ in range(n - len(out)):
@@ -62,8 +58,7 @@ def fetch_ip(ip: str):
     try:
         r = requests.get(requote_uri(IP_API_URL.format(ip)), timeout=8).json()
     except Exception as e:
-        logger.error("API error: %s", e)
-        return {"error": f"{ip}: gagal koneksi API"}
+        logger.error("API error: %s", e); return {"error": f"{ip}: gagal koneksi API"}
     if r.get("status") != "success":
         return {"error": f"{ip}: {r.get('message','unknown')}"}
     return {
@@ -99,8 +94,7 @@ def format_ip_message(d: dict) -> str:
         f"📍 *Coords*: {tg_escape(coords)}"
     )
 
-def action_keyboard(ip: str, lat, lon, rev: str):
-    """Inline buttons under the IP card. Regenerate removed; added Scamalytics link."""
+def action_keyboard(ip: str, lat, lon):
     maps = f"https://maps.google.com/?q={lat},{lon}"
     rdns = f"https://dnschecker.org/reverse-dns.php?query={urllib.parse.quote_plus(ip)}"
     whois = f"https://who.is/whois-ip/ip-address/{urllib.parse.quote_plus(ip)}"
@@ -110,24 +104,16 @@ def action_keyboard(ip: str, lat, lon, rev: str):
             InlineKeyboardButton("🗺️ Maps", url=maps),
             InlineKeyboardButton("🔎 RDNS", url=rdns),
             InlineKeyboardButton("📖 WHOIS", url=whois),
-        ],
-        [
-            InlineKeyboardButton("⚠️ Scamalytics", url=scamalytics)
+            InlineKeyboardButton("⚠️ Scamalytics", url=scamalytics),
         ]
     ])
-
-def password_keyboard(pwd: str):
-    """Button WebApp: Copy to Clipboard (1-tap)."""
-    b64 = base64.urlsafe_b64encode(pwd.encode()).decode()
-    url = f"{WEBAPP_URL}?t={urllib.parse.quote_plus(b64)}"
-    return InlineKeyboardMarkup([[InlineKeyboardButton("📋 Copy to Clipboard", web_app=WebAppInfo(url=url))]])
 
 # ---------- Text ----------
 START_TEXT = (
     "*IP TRACK – NezaFx*\n"
-    "• Kirim/paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
+    "• Paste IP (IPv4/IPv6) atau baris log berisi IP.\n"
     "• Bot menampilkan Country, Region, City, ISP, ASN, Reverse DNS, Timezone, Coords.\n"
-    "• Password dikirim terpisah dengan tombol *Copy to Clipboard* (1-tap)."
+    "• Password dikirim terpisah sebagai *code block* — tombol **Copy** muncul otomatis."
 )
 
 # ---------- Handlers ----------
@@ -147,22 +133,22 @@ async def auto_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tg_escape("❌ " + data["error"]), parse_mode="MarkdownV2")
             continue
 
-        # 1) IP info (modern & clean) + action buttons (Maps, RDNS, WHOIS, Scamalytics)
-        msg = format_ip_message(data)
-        kb = action_keyboard(data["ip"], data["lat"], data["lon"], data["rev"])
-        await update.message.reply_text(msg, parse_mode="MarkdownV2", reply_markup=kb)
+        # 1) Kartu IP + tombol aksi
+        await update.message.reply_text(
+            format_ip_message(data), parse_mode="MarkdownV2",
+            reply_markup=action_keyboard(data["ip"], data["lat"], data["lon"])
+        )
 
-        # 2) Password message (code block) + webapp copy button
+        # 2) Password sebagai CODE BLOCK (tombol Copy bawaan Telegram)
         pwd = generate_password_strict()
-        await update.message.reply_text(f"🔐 Password:\n```\n{pwd}\n```", parse_mode="MarkdownV2",
-                                        reply_markup=password_keyboard(pwd))
+        await update.message.reply_text(f"🔐 Password:\n```\n{pwd}\n```", parse_mode="MarkdownV2")
 
 # ---------- Main ----------
 def main():
     app = ApplicationBuilder().token(TG_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_process))
-    print("✅ Bot berjalan (auto on paste · 1-tap copy via WebApp · Scamalytics link).")
+    print("✅ Bot berjalan (auto on paste · password 1-tap copy via code block).")
     app.run_polling()
 
 if __name__ == "__main__":
