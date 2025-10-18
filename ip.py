@@ -1,39 +1,45 @@
 #!/usr/bin/env python3
 """
-IP Track Bot - Telegram-only
+Slimmed IP Track Bot - Telegram-only (updated)
 Dependencies:
   pip install python-telegram-bot==20.4 requests
 Run:
-  export TG_TOKEN="8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
+  export TG_TOKEN="your_token_here"
   python3 iptrack_bot.py
+
+What changed:
+- Removed menu items 2..7 and their handlers (file-scan, WA features)
+- Bot now auto-detects IPv4/IPv6 from any pasted text and replies immediately
+- Adds a password generator on each IP paste (secure, characters vary each time)
+- Uses ipaddress for robust IP validation
 """
 
 import logging
 import os
-import re
 import requests
+import ipaddress
+import secrets
+import string
 from pathlib import Path
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-)
+from requests.utils import requote_uri
+from telegram import Update, InputFile
 from telegram.ext import (
-    ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ConversationHandler
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    filters,
 )
 
 # ---------- Config ----------
 TG_TOKEN = os.environ.get("TG_TOKEN") or "8057275722:AAEZBhdXs14tJvCN4_JtIE5N8C49hlq1E6A"
 DATA_DIR = Path("bot_data")
-TARGET_WA_FILE = DATA_DIR / "target_wa.txt"
 HASIL_FILE = DATA_DIR / "hasil_ip.txt"
-LOGS_DIR = DATA_DIR / "uploaded_logs"
 IP_API_URL = "http://ip-api.com/json/{}"
+DEFAULT_PASSLEN = 16
 # ----------------------------
 
 DATA_DIR.mkdir(exist_ok=True)
-LOGS_DIR.mkdir(exist_ok=True)
-if not TARGET_WA_FILE.exists():
-    TARGET_WA_FILE.write_text("", encoding="utf-8")
 if not HASIL_FILE.exists():
     HASIL_FILE.write_text("", encoding="utf-8")
 
@@ -42,309 +48,169 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Conversation states
-(
-    STATE_AWAIT_IP,
-    STATE_AWAIT_IPFILE,
-    STATE_AWAIT_LOGFILE_FOR_AUTOSCAN,
-    STATE_AWAIT_WA_NUMBER,
-    STATE_AWAIT_LOGFILE_FOR_SCAN_WA,
-    STATE_AWAIT_MANUAL_TRACK
-) = range(6)
-
-
-def build_menu_keyboard():
-    buttons = [
-        [InlineKeyboardButton("1. Cek IP manual", callback_data="menu_1"),
-         InlineKeyboardButton("2. Cek IP dari file", callback_data="menu_2")],
-        [InlineKeyboardButton("3. Auto-scan dari log", callback_data="menu_3"),
-         InlineKeyboardButton("4. Lihat hasil sebelumnya", callback_data="menu_4")],
-        [InlineKeyboardButton("5. Tambah nomor WhatsApp", callback_data="menu_5"),
-         InlineKeyboardButton("6. Scan log untuk nomor WA", callback_data="menu_6")],
-        [InlineKeyboardButton("7. Track manual (Nomor + IP)", callback_data="menu_7"),
-         InlineKeyboardButton("8. Keluar", callback_data="menu_8")],
-    ]
-    return InlineKeyboardMarkup(buttons)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "📍 *TOOLS IP TRACK - EDITION ANGKASA*\n\n"
-        "Pilih salah satu menu di bawah (gunakan tombol)."
-    )
-    await update.message.reply_text(text, reply_markup=build_menu_keyboard(), parse_mode="Markdown")
-
-
-async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == "menu_1":
-        await query.message.reply_text("Ketik IP yang ingin dicek, atau /cancel untuk batal:")
-        return STATE_AWAIT_IP
-
-    if data == "menu_2":
-        await query.message.reply_text(
-            "Kirim file teks (.txt) berisi daftar IP (1 IP per baris). Atau gunakan /cancel."
-        )
-        return STATE_AWAIT_IPFILE
-
-    if data == "menu_3":
-        await query.message.reply_text(
-            "Kirim file log server (upload) untuk auto-scan IP, atau ketik nama file jika sudah di-upload sebelumnya."
-        )
-        return STATE_AWAIT_LOGFILE_FOR_AUTOSCAN
-
-    if data == "menu_4":
-        if HASIL_FILE.exists() and HASIL_FILE.stat().st_size > 0:
-            await query.message.reply_document(document=InputFile(str(HASIL_FILE)), filename="hasil_ip.txt")
-        else:
-            await query.message.reply_text("⚠️ Belum ada hasil disimpan.")
-        return ConversationHandler.END
-
-    if data == "menu_5":
-        await query.message.reply_text("Ketik nomor WhatsApp target (format internasional tanpa +, contoh: 6281234567890):")
-        return STATE_AWAIT_WA_NUMBER
-
-    if data == "menu_6":
-        await query.message.reply_text("Upload file log server (yang akan discan untuk nomor WA target):")
-        return STATE_AWAIT_LOGFILE_FOR_SCAN_WA
-
-    if data == "menu_7":
-        await query.message.reply_text("Kirim data dalam format: nomor|ip (contoh: 6281234567890|1.2.3.4)")
-        return STATE_AWAIT_MANUAL_TRACK
-
-    if data == "menu_8":
-        await query.message.reply_text("👋 Keluar. Gunakan /start lagi jika perlu.")
-        return ConversationHandler.END
-
-    await query.message.reply_text("Pilihan tidak dikenali.")
-    return ConversationHandler.END
-
 
 def query_ip_api(ip: str):
     try:
-        r = requests.get(IP_API_URL.format(ip), timeout=8).json()
+        # safe quoting for IPv6
+        url = requote_uri(IP_API_URL.format(ip))
+        r = requests.get(url, timeout=8)
+        r.raise_for_status()
+        data = r.json()
     except Exception as e:
         logger.error("IP API error: %s", e)
         return None
-    if r.get("status") == "success":
+    if data.get("status") == "success":
         hasil = (
-            f"🌐 IP: {r.get('query')}\n"
-            f"🏳 Negara: {r.get('country')}\n"
-            f"🏙 Kota: {r.get('city','-')}\n"
-            f"🏢 ISP: {r.get('isp','-')}\n"
-            f"📡 ASN: {r.get('as','-')}\n"
-            f"📍 Koordinat: {r.get('lat')},{r.get('lon')}\n"
+            f"🌐 IP: {data.get('query')}\n"
+            f"🏳 Negara: {data.get('country')}\n"
+            f"🏙 Kota: {data.get('city','-')}\n"
+            f"🏢 ISP: {data.get('isp','-')}\n"
+            f"📡 ASN: {data.get('as','-')}\n"
+            f"📍 Koordinat: {data.get('lat')},{data.get('lon')}\n"
             "---------------------------"
         )
-        # simpan
+        # append to hasil file
         with open(HASIL_FILE, "a", encoding="utf-8") as f:
             f.write(hasil + "\n")
         return hasil
     else:
-        return f"❌ Gagal cek IP {ip} (status: {r.get('message','unknown')})"
+        return f"❌ Gagal cek IP {ip} (status: {data.get('message','unknown')})"
 
 
-# ----------------- Handlers for conversation states -----------------
-
-async def handle_manual_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
-    if not text:
-        await update.message.reply_text("Input kosong. Batal.")
-        return ConversationHandler.END
-    # basic IP validation
-    m = re.match(r'^\s*(\d{1,3}(?:\.\d{1,3}){3})\s*$', text)
-    if not m:
-        await update.message.reply_text("Format IP tidak valid. Coba lagi atau /cancel.")
-        return STATE_AWAIT_IP
-    ip = m.group(1)
-    hasil = query_ip_api(ip)
-    await update.message.reply_text(hasil)
-    return ConversationHandler.END
-
-
-async def handle_ipfile_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # expects a document upload of a text file with IPs
-    doc = update.message.document
-    if not doc:
-        await update.message.reply_text("Tolong upload file teks (.txt) yang berisi IP.")
-        return STATE_AWAIT_IPFILE
-    fpath = LOGS_DIR / doc.file_name
-    await doc.get_file().download_to_drive(custom_path=str(fpath))
-    # read and process
-    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-        ips = [line.strip() for line in f if line.strip()]
-    if not ips:
-        await update.message.reply_text("File kosong atau tidak ada IP.")
-        return ConversationHandler.END
-    msg_chunks = []
-    for ip in ips:
-        # basic ip extraction (in case file has extras)
-        m = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})', ip)
-        if m:
-            hasil = query_ip_api(m.group(1))
-            msg_chunks.append(hasil)
-    await update.message.reply_text("\n".join(msg_chunks[:10]) + ("\n... (lainnya disimpan ke hasil_ip.txt)" if len(msg_chunks) > 10 else ""))
-    return ConversationHandler.END
+def generate_password(length=DEFAULT_PASSLEN):
+    """
+    Generate a password containing at least one char from each required set:
+    - Uppercase, Lowercase, Digits, Symbols
+    Uses secrets for cryptographically secure randomness.
+    """
+    if length < 4:
+        length = 4
+    sets = {
+        "upper": string.ascii_uppercase,
+        "lower": string.ascii_lowercase,
+        "digits": string.digits,
+        "symbols": "!@#$%^&*",
+    }
+    # ensure at least one from each
+    password_chars = [
+        secrets.choice(sets["upper"]),
+        secrets.choice(sets["lower"]),
+        secrets.choice(sets["digits"]),
+        secrets.choice(sets["symbols"]),
+    ]
+    all_chars = "".join(sets.values())
+    # fill the rest
+    for _ in range(length - 4):
+        password_chars.append(secrets.choice(all_chars))
+    # shuffle securely
+    secrets.SystemRandom().shuffle(password_chars)
+    return "".join(password_chars)
 
 
-async def handle_autoscan_logfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Accept either uploaded document or text message with filename when previously uploaded
-    if update.message.document:
-        doc = update.message.document
-        fpath = LOGS_DIR / doc.file_name
-        await doc.get_file().download_to_drive(custom_path=str(fpath))
+def extract_ips_from_text(text: str):
+    """
+    Extract tokens that may be IP addresses, validate with ipaddress.ip_address.
+    Returns list of valid IP strings (unique, in original textual form).
+    """
+    candidates = set()
+    # quick tokenization: split on whitespace and punctuation that commonly separates tokens
+    raw_tokens = []
+    for tok in text.replace(",", " ").replace(";", " ").replace("|", " ").split():
+        raw_tokens.append(tok.strip())
+    # also check tokens that include ':' (likely IPv6)
+    # attempt validation via ipaddress
+    for tok in raw_tokens:
+        # remove surrounding brackets (common for IPv6 in text) and strip scope id (%...)
+        t = tok.strip("[]")
+        if "%" in t:  # remove zone id like fe80::1%eth0
+            t = t.split("%", 1)[0]
+        # sometimes t may include trailing punctuation
+        t = t.rstrip(".,:;")
+        try:
+            ipobj = ipaddress.ip_address(t)
+            candidates.add(str(ipobj))
+        except Exception:
+            # not an IP
+            continue
+    return sorted(candidates)
+
+
+# ---- Telegram handlers ----
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📍 *TOOLS IP TRACK - EDITION ANGKASA (SLIM)*\n\n"
+        "Cara pakai:\n"
+        "• Cukup *paste* IP (IPv4 atau IPv6) atau baris log yang berisi IP ke chat — bot akan otomatis mendeteksi dan menampilkan hasil.\n"
+        "• Bot juga akan menghasilkan satu *password* baru setiap kali Anda paste IP.\n\n"
+        "Perintah:\n"
+        "/start - tampilkan pesan ini\n"
+        "/hasil - unduh file hasil_ip.txt\n"
+        "/cancel - batal (tidak ada percakapan aktif)\n"
+        "\nContoh: `1.2.3.4`  atau `2001:0db8:85a3:0000:0000:8a2e:0370:7334`"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def send_hasil_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if HASIL_FILE.exists() and HASIL_FILE.stat().st_size > 0:
+        await update.message.reply_document(document=InputFile(str(HASIL_FILE)), filename="hasil_ip.txt")
     else:
-        # user typed filename
-        name = (update.message.text or "").strip()
-        fpath = LOGS_DIR / name
-        if not fpath.exists():
-            await update.message.reply_text("File tidak ditemukan di server. Upload file log terlebih dahulu.")
-            return ConversationHandler.END
-
-    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-        data = f.read()
-
-    ips = sorted(set(re.findall(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', data)))
-    if not ips:
-        await update.message.reply_text("⚠️ Tidak ada IP ditemukan di log.")
-        return ConversationHandler.END
-
-    await update.message.reply_text(f"📊 Ditemukan {len(ips)} IP unik. Mulai cek (menyimpan hasil ke hasil_ip.txt)...")
-    # process but avoid flooding chat: send summary
-    summary = []
-    for ip in ips:
-        hasil = query_ip_api(ip)
-        summary.append(hasil)
-    # send only first 8 entries, full file already saved in hasil_ip.txt
-    await update.message.reply_text("\n\n".join(summary[:8]) + (("\n\n... hasil lengkap disimpan ke hasil_ip.txt") if len(summary) > 8 else ""))
-    # optionally send hasil file
-    await update.message.reply_document(document=InputFile(str(HASIL_FILE)), filename="hasil_ip.txt")
-    return ConversationHandler.END
-
-
-async def handle_wa_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    nomor = (update.message.text or "").strip()
-    if not nomor.startswith("62"):
-        await update.message.reply_text("⚠️ Gunakan format internasional tanpa +. Contoh: 6281234567890")
-        return STATE_AWAIT_WA_NUMBER
-    # simpan
-    with open(TARGET_WA_FILE, "a", encoding="utf-8") as f:
-        f.write(nomor + "\n")
-    await update.message.reply_text(f"✅ Nomor {nomor} disimpan.")
-    return ConversationHandler.END
-
-
-async def handle_scan_log_for_wa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # user must upload log (document) that will be scanned against targets
-    if update.message.document:
-        doc = update.message.document
-        fpath = LOGS_DIR / doc.file_name
-        await doc.get_file().download_to_drive(custom_path=str(fpath))
-    else:
-        await update.message.reply_text("Upload file log (dokumen).")
-        return STATE_AWAIT_LOGFILE_FOR_SCAN_WA
-
-    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-        data = f.read()
-
-    targets = [t.strip() for t in TARGET_WA_FILE.read_text(encoding="utf-8").splitlines() if t.strip()]
-    if not targets:
-        await update.message.reply_text("⚠️ Belum ada nomor target. Tambahkan dulu lewat menu 5.")
-        return ConversationHandler.END
-
-    found_any = False
-    reply_parts = []
-    for nomor in targets:
-        if nomor in data:
-            found_any = True
-            lines = [l for l in data.splitlines() if nomor in l]
-            for l in lines:
-                m = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})', l)
-                if m:
-                    ip = m.group(1)
-                    hasil = query_ip_api(ip)
-                    reply_parts.append(f"Nomor: {nomor}\n{hasil}")
-
-    if not found_any:
-        await update.message.reply_text("⚠️ Tidak ada nomor target ditemukan di log.")
-    else:
-        # send as document if too long
-        text_out = "\n\n".join(reply_parts)
-        if len(text_out) > 3500:
-            temp = DATA_DIR / "scan_wa_result.txt"
-            temp.write_text(text_out, encoding="utf-8")
-            await update.message.reply_document(document=InputFile(str(temp)), filename="scan_wa_result.txt")
-        else:
-            await update.message.reply_text(text_out)
-    return ConversationHandler.END
-
-
-async def handle_manual_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
-    # allow "nomor|ip" or "nomor ip"
-    if "|" in text:
-        nomor, ip = [p.strip() for p in text.split("|", 1)]
-    else:
-        parts = text.split()
-        if len(parts) >= 2:
-            nomor, ip = parts[0], parts[1]
-        else:
-            await update.message.reply_text("Format salah. Contoh: 6281234567890|1.2.3.4")
-            return STATE_AWAIT_MANUAL_TRACK
-
-    m = re.match(r'(\d{1,3}(?:\.\d{1,3}){3})', ip)
-    if not m:
-        await update.message.reply_text("Format IP tidak valid.")
-        return STATE_AWAIT_MANUAL_TRACK
-    ip_clean = m.group(1)
-    hasil = query_ip_api(ip_clean)
-    pesan = f"📱 *Track Manual*\nNomor: {nomor}\n{hasil}"
-    await update.message.reply_text(pesan, parse_mode="Markdown")
-    return ConversationHandler.END
+        await update.message.reply_text("⚠️ Belum ada hasil tersimpan.")
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Batal. Gunakan /start untuk kembali ke menu.")
-    return ConversationHandler.END
+    await update.message.reply_text("Batal. Gunakan /start untuk melihat instruksi.")
 
 
-# fallback: plain messages when not in conversation
-async def text_handler_default(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Gunakan /start untuk membuka menu.")
+async def auto_process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Main auto handler: if the message contains any valid IPv4/IPv6, process them.
+    Otherwise, prompt user to paste IP.
+    """
+    text = update.message.text or ""
+    ips = extract_ips_from_text(text)
+    if not ips:
+        await update.message.reply_text("Tidak ada IP valid ditemukan. Paste IP (IPv4/IPv6) atau baris log yang berisi IP.")
+        return
+
+    # For each IP, query and append password
+    reply_parts = []
+    for ip in ips:
+        hasil = query_ip_api(ip)
+        if hasil is None:
+            hasil = f"❌ Error saat cek IP {ip}"
+        # generate password for this IP (length default)
+        password = generate_password()
+        reply_parts.append(f"{hasil}\n🔐 Generated password: `{password}`")
+    # send combined reply (markdown for password code)
+    # limit message length: if too long, send as file
+    full_reply = "\n\n".join(reply_parts)
+    if len(full_reply) > 3500:
+        temp = DATA_DIR / "ip_query_result.txt"
+        temp.write_text(full_reply, encoding="utf-8")
+        await update.message.reply_document(document=InputFile(str(temp)), filename="ip_query_result.txt")
+    else:
+        await update.message.reply_text(full_reply, parse_mode="Markdown")
+
+
+async def text_default(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # fallback for other texts (shouldn't be necessary because auto_process_text handles text)
+    await update.message.reply_text("Paste an IP (IPv4 or IPv6) and I'll check it automatically.")
 
 
 def main():
     app = ApplicationBuilder().token(TG_TOKEN).build()
 
-    conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(menu_callback, pattern="^menu_")],
-        states={
-            STATE_AWAIT_IP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_ip)],
-            STATE_AWAIT_IPFILE: [MessageHandler(filters.Document.ALL, handle_ipfile_upload)],
-            STATE_AWAIT_LOGFILE_FOR_AUTOSCAN: [
-                MessageHandler(filters.Document.ALL | (filters.TEXT & ~filters.COMMAND), handle_autoscan_logfile)
-            ],
-            STATE_AWAIT_WA_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_wa_number)],
-            STATE_AWAIT_LOGFILE_FOR_SCAN_WA: [
-                MessageHandler(filters.Document.ALL, handle_scan_log_for_wa)
-            ],
-            STATE_AWAIT_MANUAL_TRACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_track)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True,
-        persistent=False
-    )
-
+    # handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))  # buttons
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler_default))
+    app.add_handler(CommandHandler("hasil", send_hasil_file))
     app.add_handler(CommandHandler("cancel", cancel))
 
-    print("Bot berjalan. Tekan Ctrl+C untuk berhenti.")
+    # auto IP detection handler: any text message will be checked for IPs
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_process_text))
+
+    print("Bot berjalan (slim). Tekan Ctrl+C untuk berhenti.")
     app.run_polling()
 
 
