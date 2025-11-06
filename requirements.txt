@@ -1,0 +1,9 @@
+requests
+flask
+selenium
+pyautogui
+pynput
+playsound
+colorama
+schedule
+psutil
